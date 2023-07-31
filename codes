@@ -1,0 +1,162 @@
+!pip install nsepy
+#for downloading dataset
+
+from sklearn.metrics import confusion_matrix
+
+pip install yfinance
+
+# Initializing libraries
+#from nsepy import get_history as gh
+import yfinance as gh
+import datetime as dt
+from matplotlib import pyplot as plt
+from sklearn import model_selection
+from sklearn.metrics import confusion_matrix
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import LSTM
+from keras.layers import Dropout
+
+#We will fetch 6 years of historical prices (https://nsepy.xyz)
+#of SBIN from 01.01.2013 to 31.12.2018.
+#So we need to set the start and end dates and pass these parameters 
+#to the function for fetching the data.
+start = dt.datetime(2013,1,1)
+end = dt.datetime(2018,12,31)
+stk_data = gh.download('SBIN.NS',start=start,end=end)
+
+stk_data.head()
+
+
+#We can visualise the fetched data in the above step. 
+#For simplicity, only the day-wise opening prices are visualised.
+plt.figure(figsize=(14,14))
+plt.plot(stk_data['Open'])
+plt.title('Historical Stock Value')
+plt.xlabel('Date')
+plt.ylabel('Stock Price')
+plt.show()
+
+
+#There are 12 columns in the fetched data. Many of the columns are not of our interest 
+#so only significant columns are selected to create the main dataset.
+stk_data['Date'] = stk_data.index
+data2 = pd.DataFrame(columns = ['Date', 'Open', 'High', 'Low', 'Close'])
+data2['Date'] = stk_data['Date']
+data2['Open'] = stk_data['Open']
+data2['High'] = stk_data['High']
+data2['Low'] = stk_data['Low']
+data2['Close'] = stk_data['Close']
+
+data2.head()
+
+
+
+data2.shape
+#data2.iloc[:, 1:2].values
+
+
+
+# Preprocess the data in order to prepare it for the LSTM model. 
+#The data fetched in step one is used for training purpose only.
+train_set = data2.iloc[:, 1:2].values
+sc = MinMaxScaler(feature_range = (0, 1))
+training_set_scaled = sc.fit_transform(train_set)
+X_train = []
+y_train = []
+for i in range(60, 1477):
+    X_train.append(training_set_scaled[i-60:i, 0])
+    y_train.append(training_set_scaled[i, 0]) 
+X_train, y_train = np.array(X_train), np.array(y_train)
+X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+
+X_train.shape
+
+y_train.shape
+
+# Define the LSTM Recurrent Neural Network. 
+regressor = Sequential()
+regressor.add(LSTM(units = 50, return_sequences = True, input_shape = (X_train.shape[1], 1)))
+regressor.add(Dropout(0.2))
+regressor.add(LSTM(units = 50, return_sequences = True))
+regressor.add(Dropout(0.2))
+regressor.add(LSTM(units = 50, return_sequences = True))
+regressor.add(Dropout(0.2))
+regressor.add(LSTM(units = 50))
+regressor.add(Dropout(0.2))
+regressor.add(Dense(units = 1))
+
+
+#Compile and train the model 
+regressor.compile(optimizer = 'adam', loss = 'mean_squared_error')
+regressor.fit(X_train, y_train, epochs = 5, batch_size = 32)
+
+
+#Model needs to be tested on the testing data. 
+#For this purpose, fetch the new data for a different period. 
+testdataframe= gh.download('SBIN.NS',start=dt.datetime(2019,1,1),end=dt.datetime(2019,9,18))
+testdataframe['Date'] = testdataframe.index
+testdata = pd.DataFrame(columns = ['Date', 'Open', 'High', 'Low', 'Close'])
+testdata['Date'] = testdataframe['Date']
+testdata['Open'] = testdataframe['Open']
+testdata['High'] = testdataframe['High']
+testdata['Low'] = testdataframe['Low']
+testdata['Close'] = testdataframe['Close']
+real_stock_price = testdata.iloc[:, 1:2].values
+dataset_total = pd.concat((data2['Open'], testdata['Open']), axis = 0)
+inputs = dataset_total[len(dataset_total) - len(testdata) - 60:].values
+inputs = inputs.reshape(-1,1)
+inputs = sc.transform(inputs)
+X_test = []
+for i in range(60, 235):
+    X_test.append(inputs[i-60:i, 0])
+
+X_test = np.array(X_test)
+print(X_test.shape)
+# X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+#X_test = np.reshape(X_test, (X_test.shape[0], 1, 1))
+
+
+X_test = X_test[:-1]
+
+# X_test.shape[1], type(X_test), X_train.shape, 
+X_test_ = pd.DataFrame()
+i = 0
+# value of i define time span
+if i < 60:
+    for x in X_test:
+        temp = []
+        for x_ in x:
+            temp.append(x_)
+
+        X_test_[i] = temp
+        i = i+1
+        
+X_test = X_test_.T
+
+X_test.shape
+
+X_test = np.reshape(X_test.values, (X_test.shape[0], X_test.shape[1], 1))
+
+
+
+predicted_stock_price = regressor.predict(X_test)
+predicted_stock_price = sc.inverse_transform(predicted_stock_price)
+
+#plotting prediction
+plt.figure(figsize=(20,10))
+plt.plot(real_stock_price, color = 'green', label = 'SBI Stock Price')
+plt.plot(predicted_stock_price, color = 'red', label = 'Predicted SBI Stock Price')
+plt.title('SBI Stock Price Prediction')
+plt.xlabel('Trading Day')
+plt.ylabel('SBI Stock Price')
+plt.legend()
+plt.show()
+
+
+
